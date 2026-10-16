@@ -10,8 +10,14 @@ MUSHROOM_HP = 4
 
 
 def mushroom_color(hp):
-    """Return an (r, g, b) colour for a mushroom with the given hit points, or None for the default."""
-    pass
+    """Return a colour based on the mushroom's remaining hit points."""
+    colors = {
+        4: (255, 255, 255),  # Full health: white
+        3: (255, 200, 80),   # One hit: yellow-orange
+        2: (255, 130, 80),   # Two hits: orange
+        1: (255, 60, 60),    # Almost destroyed: red
+    }
+    return colors.get(hp)
 
 
 def on_segment_hit(segment, score):
@@ -75,7 +81,7 @@ class Game:
 
     def hit_mushroom(self, cell):
         self.mushrooms[cell] -= 1
-        # FIX: Remove the mushroom only after its fourth hit.
+        # Task 1 fix: remove the mushroom only after its fourth hit.
         if self.mushrooms[cell] <= 0:
             del self.mushrooms[cell]
             self.score += 5
