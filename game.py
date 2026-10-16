@@ -12,27 +12,49 @@ MUSHROOM_HP = 4
 def mushroom_color(hp):
     """Return a colour based on the mushroom's remaining hit points."""
     colors = {
-        4: (255, 255, 255),  # Full health: white
-        3: (255, 200, 80),   # One hit: yellow-orange
-        2: (255, 130, 80),   # Two hits: orange
-        1: (255, 60, 60),    # Almost destroyed: red
+        4: (255, 255, 255),
+        3: (255, 200, 80),
+        2: (255, 130, 80),
+        1: (255, 60, 60),
     }
     return colors.get(hp)
 
 
 def on_segment_hit(segment, score):
-    """Called whenever a centipede segment is shot; add sparkles, sounds, or bonus points here."""
-    pass
+    """Create a short-lived spark effect at the destroyed segment's position."""
+    sparks = []
+    center_x = segment.col * CELL + CELL // 2
+    center_y = segment.row * CELL + CELL // 2
+
+    for _ in range(12):
+        angle = random.uniform(0, 2 * 3.141592653589793)
+        speed = random.uniform(40, 140)
+        sparks.append({
+            "x": float(center_x),
+            "y": float(center_y),
+            "vx": speed * pygame.math.Vector2(
+                random.uniform(-1, 1), random.uniform(-1, 1)
+            ).normalize().x,
+            "vy": speed * pygame.math.Vector2(
+                random.uniform(-1, 1), random.uniform(-1, 1)
+            ).normalize().y,
+            "life": random.uniform(0.2, 0.5),
+        })
+
+    # This function is called by Game.split_chain. Store the effect
+    # through the segment so the game can display it in subsequent frames.
+    segment.sparks = sparks
 
 
 def wave_speed_bonus(wave):
-    """Return an extra tick-rate multiplier for centipede segments at the given wave, or None for the default speed."""
+    """Return None to use the default speed until Task 4."""
     pass
 
 
 class Segment:
     def __init__(self, row, col, direction):
         self.row, self.col, self.dx, self.dy = row, col, direction, 1
+        self.sparks = []
 
     def step(self, mushrooms):
         nxt = self.col + self.dx
@@ -49,6 +71,7 @@ class Segment:
 
 class Game:
     def __init__(self):
+        pygame.init()
         self.font = pygame.font.Font(None, 26)
         self.reset()
 
@@ -61,6 +84,7 @@ class Game:
             ] = MUSHROOM_HP
         self.respawn()
         self.spawn_wave()
+        self.sparks = []
 
     def respawn(self):
         self.x = WIDTH / 2
@@ -81,7 +105,6 @@ class Game:
 
     def hit_mushroom(self, cell):
         self.mushrooms[cell] -= 1
-        # Task 1 fix: remove the mushroom only after its fourth hit.
         if self.mushrooms[cell] <= 0:
             del self.mushrooms[cell]
             self.score += 5
@@ -94,17 +117,13 @@ class Game:
         self.mushrooms[(segment.row, segment.col)] = MUSHROOM_HP
         self.score += 100 if index == 0 else 10
         on_segment_hit(segment, self.score)
+        self.sparks.extend(segment.sparks)
 
     def update_bullet(self, dt):
         if self.bullet is None:
             return
-
         self.bullet.y -= BULLET_SPEED * dt
-        cell = (
-            int(self.bullet.y // CELL),
-            int(self.bullet.x // CELL)
-        )
-
+        cell = (int(self.bullet.y // CELL), int(self.bullet.x // CELL))
         if self.bullet.y < 0:
             self.bullet = None
         elif cell in self.mushrooms:
@@ -123,26 +142,20 @@ class Game:
             return
 
         self.invulnerable = max(0.0, self.invulnerable - dt)
-
         self.x += (
             keys[pygame.K_RIGHT] - keys[pygame.K_LEFT]
         ) * PLAYER_SPEED * dt
         self.y += (
             keys[pygame.K_DOWN] - keys[pygame.K_UP]
         ) * PLAYER_SPEED * dt
-
         self.x = max(10, min(WIDTH - 10, self.x))
-        self.y = max(
-            ZONE_TOP * CELL + 10,
-            min(ROWS * CELL - 10, self.y)
-        )
+        self.y = max(ZONE_TOP * CELL + 10, min(ROWS * CELL - 10, self.y))
 
         if keys[pygame.K_SPACE]:
             self.fire()
 
         self.update_bullet(dt)
         self.timer += dt
-
         effective_tick = TICK / (wave_speed_bonus(self.wave) or 1)
 
         while self.timer >= effective_tick:
@@ -151,15 +164,17 @@ class Game:
                 for segment in chain:
                     segment.step(self.mushrooms)
 
-        player_cell = (
-            int(self.y // CELL),
-            int(self.x // CELL)
-        )
+        # Update spark particle positions and fade them out.
+        for spark in self.sparks[:]:
+            spark["x"] += spark["vx"] * dt
+            spark["y"] += spark["vy"] * dt
+            spark["life"] -= dt
+            if spark["life"] <= 0:
+                self.sparks.remove(spark)
 
+        player_cell = (int(self.y // CELL), int(self.x // CELL))
         if self.invulnerable <= 0 and any(
-            (s.row, s.col) == player_cell
-            for c in self.chains
-            for s in c
+            (s.row, s.col) == player_cell for c in self.chains for s in c
         ):
             self.lives -= 1
             self.respawn()
@@ -175,26 +190,13 @@ class Game:
 
         for (row, col), hp in self.mushrooms.items():
             color = mushroom_color(hp) or (
-                200 - (MUSHROOM_HP - hp) * 40,
-                80,
-                170
+                200 - (MUSHROOM_HP - hp) * 40, 80, 170
             )
-            center = (
-                col * CELL + CELL // 2,
-                row * CELL + CELL // 2
-            )
-            pygame.draw.circle(
-                screen, color, center, CELL // 2 - 1
-            )
+            center = (col * CELL + CELL // 2, row * CELL + CELL // 2)
+            pygame.draw.circle(screen, color, center, CELL // 2 - 1)
             pygame.draw.rect(
-                screen,
-                (230, 230, 200),
-                (
-                    center[0] - 3,
-                    center[1],
-                    6,
-                    CELL // 2 - 1
-                )
+                screen, (230, 230, 200),
+                (center[0] - 3, center[1], 6, CELL // 2 - 1)
             )
 
         for chain in self.chains:
@@ -203,60 +205,39 @@ class Game:
                     segment.col * CELL + CELL // 2,
                     segment.row * CELL + CELL // 2
                 )
-                color = (
-                    (240, 200, 60)
-                    if index == 0
-                    else (80, 220, 90)
-                )
-                pygame.draw.circle(
-                    screen, color, center, CELL // 2
-                )
+                color = (240, 200, 60) if index == 0 else (80, 220, 90)
+                pygame.draw.circle(screen, color, center, CELL // 2)
+
+        # Draw the sparks created when a centipede segment is hit.
+        for spark in self.sparks:
+            brightness = max(0, min(255, int(255 * spark["life"] / 0.5)))
+            pygame.draw.circle(
+                screen, (255, brightness, 40),
+                (int(spark["x"]), int(spark["y"])), 3
+            )
 
         if self.bullet:
             pygame.draw.rect(
-                screen,
-                (255, 255, 255),
-                (
-                    self.bullet.x - 1,
-                    self.bullet.y - 6,
-                    3,
-                    10
-                )
+                screen, (255, 255, 255),
+                (self.bullet.x - 1, self.bullet.y - 6, 3, 10)
             )
 
-        if self.invulnerable <= 0 or int(
-            self.invulnerable * 10
-        ) % 2 == 0:
+        if self.invulnerable <= 0 or int(self.invulnerable * 10) % 2 == 0:
             pygame.draw.polygon(
-                screen,
-                (80, 200, 255),
-                [
-                    (self.x, self.y - 10),
-                    (self.x + 10, self.y + 10),
-                    (self.x - 10, self.y + 10)
-                ]
+                screen, (80, 200, 255),
+                [(self.x, self.y - 10), (self.x + 10, self.y + 10),
+                 (self.x - 10, self.y + 10)]
             )
 
         hud = self.font.render(
-            f"Score {self.score}  Lives {self.lives}  "
-            f"Wave {self.wave}  R = reset",
-            True,
-            (240, 240, 240)
+            f"Score {self.score}  Lives {self.lives}  Wave {self.wave}  R = reset",
+            True, (240, 240, 240)
         )
         screen.blit(hud, (10, ROWS * CELL + 6))
 
         if self.state == "lose":
-            label = self.font.render(
-                "GAME OVER - Press R",
-                True,
-                (255, 255, 120)
-            )
-            screen.blit(
-                label,
-                label.get_rect(
-                    center=(WIDTH // 2, HEIGHT // 2)
-                )
-            )
+            label = self.font.render("GAME OVER - Press R", True, (255, 255, 120))
+            screen.blit(label, label.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
 
 
 def main():
@@ -269,14 +250,10 @@ def main():
 
     while running:
         dt = min(clock.tick(60) / 1000, 0.05)
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif (
-                event.type == pygame.KEYDOWN
-                and event.key == pygame.K_r
-            ):
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
                 game.reset()
 
         game.update(dt, pygame.key.get_pressed())
