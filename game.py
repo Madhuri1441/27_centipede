@@ -27,28 +27,29 @@ def on_segment_hit(segment, score):
     center_y = segment.row * CELL + CELL // 2
 
     for _ in range(12):
-        angle = random.uniform(0, 2 * 3.141592653589793)
+        direction = pygame.Vector2(
+            random.uniform(-1, 1),
+            random.uniform(-1, 1)
+        )
+        if direction.length_squared() == 0:
+            direction = pygame.Vector2(1, 0)
+        direction = direction.normalize()
         speed = random.uniform(40, 140)
+
         sparks.append({
             "x": float(center_x),
             "y": float(center_y),
-            "vx": speed * pygame.math.Vector2(
-                random.uniform(-1, 1), random.uniform(-1, 1)
-            ).normalize().x,
-            "vy": speed * pygame.math.Vector2(
-                random.uniform(-1, 1), random.uniform(-1, 1)
-            ).normalize().y,
+            "vx": speed * direction.x,
+            "vy": speed * direction.y,
             "life": random.uniform(0.2, 0.5),
         })
 
-    # This function is called by Game.split_chain. Store the effect
-    # through the segment so the game can display it in subsequent frames.
     segment.sparks = sparks
 
 
 def wave_speed_bonus(wave):
-    """Return None to use the default speed until Task 4."""
-    pass
+    """Increase centipede speed by 15% for each successive wave."""
+    return 1 + 0.15 * (wave - 1)
 
 
 class Segment:
@@ -71,7 +72,6 @@ class Segment:
 
 class Game:
     def __init__(self):
-        pygame.init()
         self.font = pygame.font.Font(None, 26)
         self.reset()
 
@@ -122,8 +122,10 @@ class Game:
     def update_bullet(self, dt):
         if self.bullet is None:
             return
+
         self.bullet.y -= BULLET_SPEED * dt
         cell = (int(self.bullet.y // CELL), int(self.bullet.x // CELL))
+
         if self.bullet.y < 0:
             self.bullet = None
         elif cell in self.mushrooms:
@@ -156,6 +158,7 @@ class Game:
 
         self.update_bullet(dt)
         self.timer += dt
+
         effective_tick = TICK / (wave_speed_bonus(self.wave) or 1)
 
         while self.timer >= effective_tick:
@@ -164,7 +167,6 @@ class Game:
                 for segment in chain:
                     segment.step(self.mushrooms)
 
-        # Update spark particle positions and fade them out.
         for spark in self.sparks[:]:
             spark["x"] += spark["vx"] * dt
             spark["y"] += spark["vy"] * dt
@@ -208,7 +210,6 @@ class Game:
                 color = (240, 200, 60) if index == 0 else (80, 220, 90)
                 pygame.draw.circle(screen, color, center, CELL // 2)
 
-        # Draw the sparks created when a centipede segment is hit.
         for spark in self.sparks:
             brightness = max(0, min(255, int(255 * spark["life"] / 0.5)))
             pygame.draw.circle(
